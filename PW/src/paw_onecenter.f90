@@ -21,6 +21,7 @@ MODULE paw_onecenter
     USE paw_variables,  ONLY : paw_info, rad, radial_grad_style, vs_rad
     USE mp_images,      ONLY : nproc_image, me_image, intra_image_comm
     USE mp,             ONLY : mp_sum
+    USE nvtx ! Added by Ben
     !
     IMPLICIT NONE
     !
@@ -160,6 +161,7 @@ MODULE paw_onecenter
              i%ae = i_what
              NULLIFY( rho_core )
              !
+             call nvtxStartRange('PAW_rho_lm') ! Added by Ben
              IF (i_what == AE) THEN
                 ! Compute rho spherical harmonics expansion from becsum and pfunc
                 CALL PAW_rho_lm( i, becsum, upf(i%t)%paw%pfunc, rho_lm )
@@ -180,11 +182,14 @@ MODULE paw_onecenter
                 sgn = -1._DP                 ! as before
                 with_small_so = .FALSE.
              ENDIF
+             call nvtxEndRange() ! Added by Ben
              ! cleanup auxiliary potentials
              savedv_lm(:,:,:) = 0._DP
              !
              ! First compute the Hartree potential (it does not depend on spin...):
+             call nvtxStartRange('PAW_h_potential') ! Added by Ben
              CALL PAW_h_potential( i, rho_lm, v_lm(:,:,1), energy )
+             call nvtxEndRange() ! Added by Ben
              !
              ! NOTE: optional variables works recursively: e.g. if energy is not present here
              ! it will not be present in PAW_h_potential either!
@@ -196,12 +201,15 @@ MODULE paw_onecenter
              ENDDO
              !
              ! Then the XC one:
+             call nvtxStartRange('PAW_xc_potential') ! Added by Ben
              CALL PAW_xc_potential( i, rho_lm, rho_core, v_lm, energy )
+             call nvtxEndRange() ! Added by Ben
              !IF (PRESENT(energy)) write(*,*) 'X',i%a,i_what,sgn*energy
              IF (PRESENT(energy) .AND. mykey == 0 ) energy_tot = energy_tot + sgn*energy
              IF (PRESENT(e_cmp)  .AND. mykey == 0 ) e_cmp(ia, XC, i_what) = sgn*energy
              savedv_lm(:,:,:) = savedv_lm(:,:,:) + v_lm(:,:,:)
              !
+             call nvtxStartRange('loop_spins') ! Added by Ben
              spins: DO is = 1, nspin_mag
                 nmb = 0
                 ! loop on all pfunc for this kind of pseudo
@@ -211,6 +219,7 @@ MODULE paw_onecenter
                       !
                       ! compute the density from a single pfunc
                       becfake( nmb, ia, is ) = 1._DP
+                      call nvtxStartRange('PAW_rho_lm') ! Added by Ben
                       IF (i_what == AE) THEN
                          CALL PAW_rho_lm( i, becfake, upf(i%t)%paw%pfunc, rho_lm )
                          IF (with_small_so) &
@@ -219,6 +228,7 @@ MODULE paw_onecenter
                          CALL PAW_rho_lm( i, becfake, upf(i%t)%paw%ptfunc, rho_lm, upf(i%t)%qfuncl )
                          !                  optional argument for pseudo part --> ^^^
                       ENDIF
+                      call nvtxEndRange() ! Added by Ben
                       !
                       ! Now I multiply the rho_lm and the potential, I can use
                       ! rho_lm itself as workspace
@@ -227,6 +237,7 @@ MODULE paw_onecenter
                             rho_lm(j,lm,is) = rho_lm(j,lm,is) * savedv_lm(j,lm,is)
                          ENDDO
                          ! Integrate!
+                         call nvtxStartRange('simpson') ! Added by Ben
                          CALL simpson( kkbeta, rho_lm(1,lm,is), g(i%t)%rab(1), integral )
                          d(nmb,i%a,is) = d(nmb,i%a,is) + sgn * integral
                          IF ( is>1 .AND. with_small_so .AND. i_what==AE ) THEN
@@ -236,12 +247,14 @@ MODULE paw_onecenter
                             CALL simpson( kkbeta, msmall_lm(1,lm,is), g(i%t)%rab(1), integral )
                             d(nmb,i%a,is) = d(nmb,i%a,is) + sgn * integral
                          ENDIF
+                         call nvtxEndRange() ! Added by Ben
                       ENDDO
                       ! restore becfake to zero
                       becfake(nmb,ia,is) = 0._DP
                    ENDDO ! mb
                 ENDDO ! nb
              ENDDO spins
+             call nvtxEndRange() ! Added by Ben
              IF (with_small_so) THEN
                 DEALLOCATE( msmall_lm )
                 DEALLOCATE( g_lm )
@@ -256,10 +269,12 @@ MODULE paw_onecenter
     ENDDO atoms
 #if defined(__MPI)
     ! recollect D coeffs and total one-center energy
+    call nvtxStartRange('mp_sum') ! Added by Ben
     IF( mykey /= 0 ) energy_tot = 0.0d0
     CALL mp_sum(energy_tot, intra_image_comm)
     IF( mykey /= 0 ) d = 0.0d0
     CALL mp_sum(d, intra_image_comm)
+    call nvtxEndRange() ! Added by Ben
 #endif
     ! put energy back in the output variable
     IF ( PRESENT(energy) ) energy = energy_tot
