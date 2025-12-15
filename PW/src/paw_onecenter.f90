@@ -534,10 +534,13 @@ MODULE paw_onecenter
         ! --- LDA (and LSDA) part (no gradient correction) ---
         ! convert _lm density to real density along ix
         !
+        call nvtxStartRange('PAW_lm2rad') ! Added by Ben
         CALL PAW_lm2rad( i, ix, rho_lm, rho_rad, nspin_mag )
+        call nvtxEndRange() ! Added by Ben
         !
         ! compute the potential along ix
         !
+        call nvtxStartRange('pot_ix') ! Added by Ben
         IF ( nspin_mag==4 ) THEN
            IF (with_small_so .AND. i%ae==1) CALL add_small_mag( i, ix, rho_rad )
            !
@@ -546,8 +549,11 @@ MODULE paw_onecenter
               rho_loc(k,1) = rho_loc(k,1) + rho_core(k)
            ENDDO
            !
+           call nvtxStartRange('xc') ! Added by Ben
            CALL xc( i%m, 4, 2, rho_loc, ex, ec, vx, vc )
+           call nvtxEndRange() ! Added by Ben
            !
+           call nvtxStartRange('loop-post-xc') ! Added by Ben
            DO k = 1, i%m
               IF (PRESENT(energy)) &
                   e_rad(k) = e2*(ex(k)+ec(k))*(rho_rad(k,1)+rho_core(k)*g(i%t)%r2(k))
@@ -561,6 +567,7 @@ MODULE paw_onecenter
                  IF (PRESENT(energy)) e_rad(k)=0.0_DP
               ENDIF
            ENDDO
+           call nvtxEndRange() ! Added by Ben
            !
            IF ( with_small_so ) CALL compute_g( i, ix, v_rad, g_rad )
         ELSEIF ( nspin==2 ) THEN
@@ -573,9 +580,11 @@ MODULE paw_onecenter
               rho_loc(k,1) = rho_rad(k,1)*g(i%t)%rm2(k)
            ENDDO
         ENDIF
+        call nvtxEndRange() ! Added by Ben
         !
         ! Integrate to obtain the energy
         !
+        call nvtxStartRange('integrate') ! Added by Ben
         IF (nspin_mag <= 2 ) THEN
            !
            !
@@ -583,7 +592,9 @@ MODULE paw_onecenter
              !
              arho(:,1) = rho_loc(:,1) + rho_core
              !
+             call nvtxStartRange('xc') ! Added by Ben
              CALL xc( i%m, 1, 1, arho(:,1:1), ex, ec, vx(:,1:1), vc(:,1:1) )
+             call nvtxEndRange() ! Added by Ben
              !
              v_rad(:,ix,1) = e2*( vx(:,1) + vc(:,1) )
              IF (PRESENT(energy)) e_rad = e2*( ex(:) + ec(:) )
@@ -593,7 +604,9 @@ MODULE paw_onecenter
              arho(:,1) = rho_loc(:,1) + rho_loc(:,2) + rho_core(:)
              arho(:,2) = rho_loc(:,1) - rho_loc(:,2)
              !
+             call nvtxStartRange('xc') ! Added by Ben
              CALL xc( i%m, 2, 2, arho, ex, ec, vx, vc )
+             call nvtxEndRange() ! Added by Ben
              !
              v_rad(:,ix,:) = e2*( vx(:,:) + vc(:,:) )
              IF (PRESENT(energy)) e_rad(:) = e2*( ex(:) + ec(:) )
@@ -609,9 +622,12 @@ MODULE paw_onecenter
            ENDIF
            !
         ENDIF
+        call nvtxEndRange() ! Added by Ben
         ! Integrate to obtain the energy
         IF (PRESENT(energy)) THEN
+           call nvtxStartRange('simpson') ! Added by Ben
            CALL simpson( i%m, e_rad, g(i%t)%rab, e )
+           call nvtxEndRange() ! Added by Ben
            e_of_tid(mytid) = e_of_tid(mytid) + e * rad(i%t)%ww(ix)
         ENDIF
         !
@@ -639,16 +655,20 @@ MODULE paw_onecenter
     ENDIF
     !
     ! Recompose the sph. harm. expansion
+    call nvtxStartRange('PAW_rad2lm') ! Added by Ben
     CALL PAW_rad2lm( i, v_rad, v_lm, i%l, nspin_mag )
     !
     IF ( with_small_so ) THEN
        CALL PAW_rad2lm( i, g_rad, g_lm, i%l, nspin_mag )
        DEALLOCATE( g_rad )
     ENDIF
+    call nvtxEndRange() ! Added by Ben
     !
     ! Add gradient correction, if necessary
     IF ( xclib_dft_is('gradient') ) &
+        call nvtxStartRange('gcxc_potential') ! Added by Ben
         CALL PAW_gcxc_potential( i, rho_lm, rho_core, v_lm, energy )
+        call nvtxEndRange() ! Added by Ben
         !
     IF (TIMING) CALL stop_clock( 'PAW_xc_pot' )
     !
