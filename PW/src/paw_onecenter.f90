@@ -768,7 +768,9 @@ MODULE paw_onecenter
     IF ( nspin_mag == 2 .OR. nspin_mag == 4 ) THEN
        !   transform the noncollinear case into sigma-GGA case
        IF (noncolin) THEN
+          call nvtxStartRange('compute_rho_spin_lm') ! Added by Ben
           CALL compute_rho_spin_lm(i, rho_lm, rhoout_lm, segni_rad)
+          call nvtxEndRange() ! Added by Ben
        ELSE
           rhoout_lm=rho_lm
        ENDIF
@@ -813,8 +815,12 @@ MODULE paw_onecenter
         DO ix = ix_s, ix_e
            !
            !  WARNING: the next 2 calls are duplicated for spin==2
+           call nvtxStartRange('PAW_lm2rad') ! Added by Ben
            CALL PAW_lm2rad( i, ix, rho_lm, rho_rad, nspin_mag )
+           call nvtxEndRange() ! Added by Ben
+           call nvtxStartRange('gradient') ! Added by Ben
            CALL PAW_gradient( i, ix, rho_lm, rho_rad, rho_core, grad2, grad )
+           call nvtxEndRange() ! Added by Ben
            !
            DO k = 1, i%m
               arho(k,1) = rho_rad(k,1)*g(i%t)%rm2(k) + rho_core(k)
@@ -822,7 +828,9 @@ MODULE paw_onecenter
               gradx(:,k,1) = grad(k,:,1)
            ENDDO
            !
+           call nvtxStartRange('xc_gcx') ! Added by Ben
            CALL xc_gcx( i%m, 1, arho, gradx, sx, sc, v1x, v2x, v1c, v2c )
+           call nvtxEndRange() ! Added by Ben
            !
            DO k = 1, i%m
               IF ( PRESENT(energy) ) &
@@ -832,10 +840,12 @@ MODULE paw_onecenter
            ENDDO
            !
            ! integrate energy (if required)
+           call nvtxStartRange('simpson') ! Added by Ben
            IF ( PRESENT(energy) ) THEN
                CALL simpson(i%m, e_rad, g(i%t)%rab, e)
                egcxc_of_tid(mytid) = egcxc_of_tid(mytid) + e*rad(i%t)%ww(ix)
            ENDIF
+           call nvtxEndRange() ! Added by Ben
            !
         ENDDO
 !$omp end do
@@ -855,8 +865,12 @@ MODULE paw_onecenter
 !$omp do
         DO ix = ix_s, ix_e
            !
+           call nvtxStartRange('PAW_lm2rad') ! Added by Ben
            CALL PAW_lm2rad( i, ix, rhoout_lm, rho_rad, nspin_gga )
+           call nvtxEndRange() ! Added by Ben
+           call nvtxStartRange('gradient') ! Added by Ben
            CALL PAW_gradient( i, ix, rhoout_lm, rho_rad, rho_core,grad2, grad )
+           call nvtxEndRange() ! Added by Ben
            !
            DO k = 1, i%m
                !
@@ -872,7 +886,9 @@ MODULE paw_onecenter
                gradx(:,k,2) = grad(k,:,2)
            ENDDO
            !
+           call nvtxStartRange('xc_gcx') ! Added by Ben
            CALL xc_gcx( i%m, 2, r_vec, gradx, sx, sc, v1x, v2x, v1c, v2c, v2cud )
+           call nvtxEndRange() ! Added by Ben
            !
            DO k = 1, i%m
               !
@@ -894,10 +910,12 @@ MODULE paw_onecenter
            !
            ! integrate energy (if required)
            ! NOTE: this integration is duplicated for every spin, FIXME!
+           call nvtxStartRange('simpson') ! Added by Ben
            IF (PRESENT(energy)) THEN
                CALL simpson( i%m, e_rad, g(i%t)%rab, e )
                egcxc_of_tid(mytid) = egcxc_of_tid(mytid) + e * rad(i%t)%ww(ix)
            ENDIF
+           call nvtxEndRange() ! Added by Ben
            !
         ENDDO ! ix
 !$omp end do nowait
@@ -922,18 +940,22 @@ MODULE paw_onecenter
     DEALLOCATE( grad2 )
 !$omp end parallel
     !
+    call nvtxStartRange('mp_sum') ! Added by Ben
     IF ( PRESENT(energy) ) THEN
        e_gcxc = SUM(egcxc_of_tid)
        CALL mp_sum( e_gcxc, paw_comm )
        energy = energy + e_gcxc
     ENDIF
+    call nvtxEndRange() ! Added by Ben
     !
     IF ( PRESENT(energy) ) THEN
        DEALLOCATE( egcxc_of_tid )
     ENDIF
     !
     ! convert the first part of the GC correction back to spherical harmonics
+    call nvtxStartRange('PAW_rad2lm') ! Added by Ben
     CALL PAW_rad2lm( i, gc_rad, gc_lm, i%l, nspin_gga )
+    call nvtxEndRange() ! Added by Ben
     !
     ! Note that the expansion into spherical harmonics of the derivative 
     ! with respect to theta of the spherical harmonics, is very slow to
@@ -950,18 +972,24 @@ MODULE paw_onecenter
     ENDDO
     ! We need the gradient of H to calculate the last part of the exchange
     ! and correlation potential. First we have to convert H to its Y_lm expansion
+    call nvtxStartRange('PAW_rad2lm3') ! Added by Ben
     CALL PAW_rad2lm3( i, h_rad, h_lm, i%l+rad(i%t)%ladd, nspin_gga )
+    call nvtxEndRange() ! Added by Ben
     !
     ! Compute div(H)
+    call nvtxStartRange('PAW_divergence') ! Added by Ben
     CALL PAW_divergence( i, h_lm, div_h, i%l+rad(i%t)%ladd, i%l )
     !                       input max lm --^  output max lm-^
+    call nvtxEndRange() ! Added by Ben
     !
     ! Finally sum it back into v_xc
+    call nvtxStartRange('sum_back_into_v_xc') ! Added by Ben
     DO is = 1,nspin_gga
       DO lm = 1,i%l**2
          vout_lm(1:i%m,lm,is) = vout_lm(1:i%m,lm,is) + e2*(gc_lm(1:i%m,lm,is)-div_h(1:i%m,lm,is))
       ENDDO
     ENDDO
+    call nvtxEndRange() ! Added by Ben
     !
     IF (nspin_mag == 4 ) THEN
        CALL compute_pot_nonc( i, vout_lm, v_lm, segni_rad, rho_lm )
@@ -1828,323 +1856,323 @@ MODULE paw_onecenter
   ! 
   !---------------------------------------------------------------------------
   SUBROUTINE PAW_dgcxc_potential( i, rho_lm, rho_core, drho_lm, v_lm )
-    !------------------------------------------------------------------------
-    !! Add gradient correction to dvxc. Both unpolarized and spin polarized
-    !! cases are supported. 
-    !
-    USE noncollin_module,       ONLY : nspin_mag, nspin_gga
-    USE lsda_mod,               ONLY : nspin
-    USE atom,                   ONLY : g => rgrid
-    USE constants,              ONLY : pi,e2, eps => eps12, eps2 => eps24
-    USE xc_lib,                 ONLY : xclib_set_threshold, xc_gcx, dgcxc
-    !
-    TYPE(paw_info), INTENT(IN) :: i
-    !! atom's minimal info
-    REAL(DP), INTENT(IN) :: rho_lm(i%m,i%l**2,nspin_mag)
-    !! charge density as lm components
-    REAL(DP), INTENT(IN) :: drho_lm(i%m,i%l**2,nspin_mag)
-    !! change of charge density as lm components
-    REAL(DP), INTENT(IN) :: rho_core(i%m)
-    !! core charge, radial and spherical
-    REAL(DP), INTENT(INOUT) :: v_lm(i%m,i%l**2,nspin_mag)
-    !! potential to be updated
-    !
-    ! ... local variables
-    !
-    REAL(DP) :: zero(i%m)                          ! dcore charge, not used
-    REAL(DP) :: rho_rad(i%m,nspin_gga)             ! charge density sampled
-    REAL(DP) :: drho_rad(i%m,nspin_gga)            ! charge density sampled
-    REAL(DP) :: grad(i%m,3,nspin_gga)              ! gradient
-    REAL(DP) :: grad2(i%m,nspin_gga)               ! square modulus of gradient
-                                                   ! (first of charge, than of hamiltonian)
-    REAL(DP) :: dgrad(i%m,3,nspin_gga)             ! gradient
-    REAL(DP) :: dgrad2(i%m,nspin_gga)              ! square modulus of gradient
-                                                   ! of dcharge
-    REAL(DP) :: gc_rad(i%m,rad(i%t)%nx,nspin_gga)  ! GC correction to V (radial samples)
-    REAL(DP) :: gc_lm(i%m,i%l**2,nspin_gga)        ! GC correction to V (Y_lm expansion)
-    REAL(DP) :: h_rad(i%m,3,rad(i%t)%nx,nspin_gga) ! hamiltonian (vector field)
-    REAL(DP) :: h_lm(i%m,3,(i%l+rad(i%t)%ladd)**2,nspin_gga) ! hamiltonian (vector field)
-                        ! ^^^^^^^^^^^^^^^^^^ expanded to higher lm than rho !
-    REAL(DP) :: vout_lm(i%m,i%l**2,nspin_gga)      ! potential to be updated
-    REAL(DP) :: rhoout_lm(i%m,i%l**2,nspin_gga)    ! change of charge density as lm components
-    REAL(DP) :: drhoout_lm(i%m,i%l**2,nspin_gga)   ! change of charge density as lm components
-    REAL(DP) :: segni_rad(i%m, rad(i%t)%nx)
+   !------------------------------------------------------------------------
+   !! Add gradient correction to dvxc. Both unpolarized and spin polarized
+   !! cases are supported. 
+   !
+   USE noncollin_module,       ONLY : nspin_mag, nspin_gga
+   USE lsda_mod,               ONLY : nspin
+   USE atom,                   ONLY : g => rgrid
+   USE constants,              ONLY : pi,e2, eps => eps12, eps2 => eps24
+   USE xc_lib,                 ONLY : xclib_set_threshold, xc_gcx, dgcxc
+   !
+   TYPE(paw_info), INTENT(IN) :: i
+   !! atom's minimal info
+   REAL(DP), INTENT(IN) :: rho_lm(i%m,i%l**2,nspin_mag)
+   !! charge density as lm components
+   REAL(DP), INTENT(IN) :: drho_lm(i%m,i%l**2,nspin_mag)
+   !! change of charge density as lm components
+   REAL(DP), INTENT(IN) :: rho_core(i%m)
+   !! core charge, radial and spherical
+   REAL(DP), INTENT(INOUT) :: v_lm(i%m,i%l**2,nspin_mag)
+   !! potential to be updated
+   !
+   ! ... local variables
+   !
+   REAL(DP) :: zero(i%m)                          ! dcore charge, not used
+   REAL(DP) :: rho_rad(i%m,nspin_gga)             ! charge density sampled
+   REAL(DP) :: drho_rad(i%m,nspin_gga)            ! charge density sampled
+   REAL(DP) :: grad(i%m,3,nspin_gga)              ! gradient
+   REAL(DP) :: grad2(i%m,nspin_gga)               ! square modulus of gradient
+                                                  ! (first of charge, than of hamiltonian)
+   REAL(DP) :: dgrad(i%m,3,nspin_gga)             ! gradient
+   REAL(DP) :: dgrad2(i%m,nspin_gga)              ! square modulus of gradient
+                                                  ! of dcharge
+   REAL(DP) :: gc_rad(i%m,rad(i%t)%nx,nspin_gga)  ! GC correction to V (radial samples)
+   REAL(DP) :: gc_lm(i%m,i%l**2,nspin_gga)        ! GC correction to V (Y_lm expansion)
+   REAL(DP) :: h_rad(i%m,3,rad(i%t)%nx,nspin_gga) ! hamiltonian (vector field)
+   REAL(DP) :: h_lm(i%m,3,(i%l+rad(i%t)%ladd)**2,nspin_gga) ! hamiltonian (vector field)
+                       ! ^^^^^^^^^^^^^^^^^^ expanded to higher lm than rho !
+   REAL(DP) :: vout_lm(i%m,i%l**2,nspin_gga)      ! potential to be updated
+   REAL(DP) :: rhoout_lm(i%m,i%l**2,nspin_gga)    ! change of charge density as lm components
+   REAL(DP) :: drhoout_lm(i%m,i%l**2,nspin_gga)   ! change of charge density as lm components
+   REAL(DP) :: segni_rad(i%m, rad(i%t)%nx)
 
-    REAL(DP) :: div_h(i%m,i%l**2,nspin_gga)        ! div(hamiltonian)
-    ! 
-    REAL(DP), ALLOCATABLE :: r(:,:), rho(:), arho(:), gradsw(:,:,:), sign_v(:)
-    REAL(DP), ALLOCATABLE :: v1x(:,:), v2x(:,:), v1c(:,:), v2c(:,:), v2c_ud(:)
-    REAL(DP), ALLOCATABLE :: dsvxc_rr(:,:,:), dsvxc_sr(:,:,:), dsvxc_ss(:,:,:)
-    
-    REAL(DP), DIMENSION(i%m) :: sx, sc
-    !
-    REAL(DP) :: dsvxc_s(nspin_gga,nspin_gga)
-    INTEGER  :: k, ix, is, lm! counters on spin and mesh
-    INTEGER  :: js, ls, ks, ipol
-    REAL(DP) :: a(2,2,2), b(2,2,2,2), c(2,2,2)
-    REAL(DP) :: s1
-    REAL(DP) :: ps(2,2), ps1(3,2,2), ps2(3,2,2,2)
-    !
-    IF (TIMING) CALL start_clock( 'PAW_dgcxc_v' )
-    !
-    zero    = 0.0_DP
-    gc_rad  = 0.0_DP
-    h_rad   = 0.0_DP
-    vout_lm = 0.0_DP
-    !
-    ALLOCATE( r(i%m,nspin_gga) )
-    ALLOCATE( v1x(i%m,nspin_gga), v2x(i%m,nspin_gga) )
-    ALLOCATE( v1c(i%m,nspin_gga), v2c(i%m,nspin_gga) )
-    IF (nspin_gga==2) ALLOCATE( v2c_ud(i%m) )
-    ALLOCATE( dsvxc_rr(i%m,nspin_gga,nspin_gga) )
-    ALLOCATE( dsvxc_sr(i%m,nspin_gga,nspin_gga) )
-    ALLOCATE( dsvxc_ss(i%m,nspin_gga,nspin_gga) )
-    ALLOCATE( gradsw(3,i%m,nspin_gga) )
-    !
-    !
-    IF ( nspin_mag == 1 ) THEN
-       !
-       !     GGA case - no spin polarization
-       !
-       ALLOCATE( sign_v(i%m) )
-       !
-       DO ix = ix_s, ix_e
-          !
-          CALL PAW_lm2rad( i, ix, rho_lm, rho_rad, nspin_mag )
-          CALL PAW_gradient( i, ix, rho_lm, rho_rad, rho_core, grad2, grad )
-          CALL PAW_lm2rad( i, ix, drho_lm, drho_rad, nspin_mag )
-          CALL PAW_gradient( i, ix, drho_lm, drho_rad, zero, dgrad2, dgrad )
-          !
-          sign_v = 1._DP
-          !
-          DO k = 1, i%m
-             ! ... arho_v is the absolute value of real charge, sgn is its sign
-             r(k,1) = rho_rad(k,1)*g(i%t)%rm2(k) + rho_core(k)
-             r(k,1) = ABS(r(k,1))
-             !
-             ! ... using grad(rho)**2 here, so its eps has to be eps**2
-             IF ( r(k,1)<eps .OR. grad2(k,1)<eps2 ) THEN
-                r(k,1) = 0.5_DP
-                grad2(k,1) = 0.2_DP
-                sign_v(k)  = 0.0_DP
-             ENDIF
-          ENDDO
-          !
-          !
-          ! swap gradient indexes to match xc_gcx input (temporary)
-          DO k = 1, i%m
-             gradsw(1:3,k,1) = grad(k,1:3,1)
-          ENDDO
-          !
-          CALL xclib_set_threshold( 'gga', 1.E-10_DP )
-          !
-          CALL dgcxc( i%m, nspin_mag, r, grad, dsvxc_rr, dsvxc_sr, dsvxc_ss )
-          !
-          dsvxc_rr = dsvxc_rr / e2
-          dsvxc_sr = dsvxc_sr / e2
-          dsvxc_ss = dsvxc_ss / e2
-          !
-          CALL xc_gcx( i%m, nspin_mag, r, gradsw, sx, sc, v1x, v2x, v1c, v2c )
-          !
-          CALL xclib_set_threshold( 'gga', 1.D-6 )
-          !
-          DO k = 1, i%m
-             s1 = grad(k,1,1) * dgrad(k,1,1) + &
-                  grad(k,2,1) * dgrad(k,2,1) + &
-                  grad(k,3,1) * dgrad(k,3,1)
-             !
-             dsvxc_s = v2x(k,1) + v2c(k,1)
-             !
-             gc_rad(k,ix,1)  = ( dsvxc_rr(k,1,1) * drho_rad(k,1) * g(i%t)%rm2(k) &
-                               + dsvxc_sr(k,1,1) * s1 ) * sign_v(k)
-             !
-             h_rad(k,:,ix,1) = ( (dsvxc_sr(k,1,1) * drho_rad(k,1) * g(i%t)%rm2(k) + &
-                                  dsvxc_ss(k,1,1)*s1) * grad(k,:,1) + &
-                                  dsvxc_s(1,1)*dgrad(k,:,1) ) * g(i%t)%r2(k) * sign_v(k)
-             !
-          ENDDO
-          !
-       ENDDO
-       !
-       DEALLOCATE( sign_v )
-       !
-       !
-    ELSEIF ( nspin_mag==2 .OR. nspin_mag==4 ) THEN
-       !
-       ! \sigma-GGA case - spin polarization
-       !
-       IF ( nspin_mag==4 ) THEN
-          CALL compute_drho_spin_lm( i, rho_lm, drho_lm, rhoout_lm, &
-                                     drhoout_lm, segni_rad )
-       ELSE
-          rhoout_lm  = rho_lm
-          drhoout_lm = drho_lm
-       ENDIF
-       !
-       DO ix = ix_s, ix_e
-          !
-          CALL PAW_lm2rad( i, ix, rhoout_lm, rho_rad, nspin_gga )
-          CALL PAW_gradient( i, ix, rhoout_lm, rho_rad, rho_core, grad2, grad )
-          CALL PAW_lm2rad( i, ix, drhoout_lm, drho_rad, nspin_gga )
-          CALL PAW_gradient( i, ix, drhoout_lm, drho_rad, zero, dgrad2, dgrad )
-          !
-          ! Prepare the necessary quantities
-          ! rho_core is considered half spin up and half spin down
-          !
-          r(:,1) = rho_rad(:,1)*g(i%t)%rm2(:) + rho_core(:)/DBLE(nspin_gga)
-          r(:,2) = rho_rad(:,2)*g(i%t)%rm2(:) + rho_core(:)/DBLE(nspin_gga)
-          !
-          ! swap gradient indexes to match xc_gcx input (temporary)
-          DO k = 1, i%m
-             gradsw(1:3,k,1) = grad(k,1:3,1)
-             gradsw(1:3,k,2) = grad(k,1:3,2)
-          ENDDO
-          !
-          CALL dgcxc( i%m, nspin_gga, r, grad, dsvxc_rr, dsvxc_sr, dsvxc_ss )
-          !
-          dsvxc_rr = dsvxc_rr / e2
-          dsvxc_sr = dsvxc_sr / e2
-          dsvxc_ss = dsvxc_ss / e2
-          !
-          CALL xc_gcx( i%m, nspin_gga, r, gradsw, sx, sc, v1x, v2x, v1c, v2c, v2c_ud )
-          !
-          DO k = 1, i%m
-             !
-             IF ( r(k,1)+r(k,2) > eps ) THEN
-                dsvxc_s(1,1) = v2x(k,1) + v2c(k,1)
-                dsvxc_s(1,2) = v2c(k,1)
-                dsvxc_s(2,1) = v2c(k,1)
-                dsvxc_s(2,2) = v2x(k,2) + v2c(k,1)
-             ELSE
-                dsvxc_s = 0._DP
-             ENDIF
-             !
-             ps(:,:) = (0._DP, 0._DP)
-             !
-             DO is = 1, nspin_gga
-                DO js = 1, nspin_gga
-                   !
-                   ps1(:,is,js) = drho_rad(k,is)*g(i%t)%rm2(k)*grad(k,:,js)
-                   !
-                   DO ipol = 1, 3
-                      ps(is,js) = ps(is,js) + grad(k,ipol,is)*dgrad(k,ipol,js)
-                   ENDDO
-                   !
-                   DO ks = 1, nspin_gga
-                      !
-                      IF ( is==js .AND. js==ks ) THEN
-                         a(is,js,ks) = dsvxc_sr(k,is,is)
-                         c(is,js,ks) = dsvxc_sr(k,is,is)
-                      ELSE
-                         IF ( is==1 ) THEN
-                            a(is,js,ks) = dsvxc_sr(k,1,2)
-                         ELSE
-                            a(is,js,ks) = dsvxc_sr(k,2,1)
-                         ENDIF
-                         IF ( js==1 ) THEN
-                            c(is,js,ks) = dsvxc_sr(k,1,2)
-                         ELSE
-                            c(is,js,ks) = dsvxc_sr(k,2,1)
-                         ENDIF
-                      ENDIF
-                      !
-                      ps2(:,is,js,ks) = ps(is,js) * grad(k,:,ks)
-                      !
-                      DO ls = 1, nspin_gga
-                         !
-                         IF ( is==js .AND. js==ks .AND. ks==ls ) THEN
-                            b(is,js,ks,ls) = dsvxc_ss(k,is,is)
-                         ELSE
-                            IF ( is==1 ) THEN
-                               b(is,js,ks,ls) = dsvxc_ss(k,1,2)
-                            ELSE
-                               b(is,js,ks,ls) = dsvxc_ss(k,2,1)
-                            ENDIF
-                         ENDIF
-                         !
-                      ENDDO
-                      !
-                   ENDDO
-                   !
-                ENDDO
-             ENDDO
-             !
-             DO is = 1, nspin_gga
-                DO js = 1, nspin_gga
-                   !
-                   gc_rad(k,ix,is)  = gc_rad(k,ix,is)  + dsvxc_rr(k,is,js) &
-                                              * drho_rad(k,js)*g(i%t)%rm2(k)
-                   h_rad(k,:,ix,is) = h_rad(k,:,ix,is) + dsvxc_s(is,js)  &
-                                              * dgrad(k,:,js)
-                   !
-                   DO ks = 1, nspin_gga
-                      !
-                      gc_rad(k,ix,is) = gc_rad(k,ix,is)+a(is,js,ks)*ps(js,ks)
-                      h_rad(k,:,ix,is) = h_rad(k,:,ix,is) + &
-                                         c(is,js,ks) * ps1(:,js,ks)
-                      DO ls = 1, nspin_gga
-                         h_rad(k,:,ix,is) = h_rad(k,:,ix,is) + &
-                                            b(is,js,ks,ls) * ps2(:,js,ks,ls)
-                      ENDDO
-                      !
-                   ENDDO
-                   !
-                ENDDO
-             ENDDO
-             !
-             h_rad(k,:,ix,:) = h_rad(k,:,ix,:)*g(i%t)%r2(k)
-             !
-          ENDDO  ! k
-          !   
-       ENDDO ! ix
-       !
-    ELSE
-       !
-       CALL errore( 'PAW_gcxc_v', 'unknown spin number', 2 )
-       !
-    ENDIF 
-    !
-    DEALLOCATE( r )
-    DEALLOCATE( v1x, v2x, v1c )
-    IF (nspin_gga==2) DEALLOCATE( v2c_ud )
-    DEALLOCATE( dsvxc_rr, dsvxc_sr, dsvxc_ss )
-    DEALLOCATE( gradsw )
-    !
-    ! convert the first part of the GC correction back to spherical harmonics
-    CALL PAW_rad2lm( i, gc_rad, gc_lm, i%l, nspin_gga )
-    !
-    ! We need the divergence of h to calculate the last part of the exchange
-    ! and correlation potential. First we have to convert H to its Y_lm expansion
-    DO ix = ix_s, ix_e
-       h_rad(1:i%m,3,ix,1:nspin_gga) = h_rad(1:i%m,3,ix,1:nspin_gga) &
-                                                     /rad(i%t)%sin_th(ix)
-    ENDDO
-    !
-    CALL PAW_rad2lm3( i, h_rad, h_lm, i%l+rad(i%t)%ladd, nspin_gga )
-    !
-    ! Compute div(H)
-    CALL PAW_divergence( i, h_lm, div_h, i%l+rad(i%t)%ladd, i%l )
-    !                         input max lm --^     ^-- output max lm
-    ! Finally sum it back into v_xc
-    DO is = 1, nspin_gga
-       DO lm = 1, i%l**2
-            vout_lm(1:i%m,lm,is) = vout_lm(1:i%m,lm,is) + &
-                                   e2*(gc_lm(1:i%m,lm,is)-div_h(1:i%m,lm,is))
-       ENDDO
-    ENDDO
-    !
-    !  In the noncollinear case we have to calculate the four components of
-    !  the potential
-    !
-    IF (nspin_mag == 4 ) THEN
-       CALL compute_dpot_nonc( i, vout_lm, v_lm, segni_rad, rho_lm, drho_lm )
-    ELSE
-       v_lm(:,:,1:nspin_mag) = v_lm(:,:,1:nspin_mag)+vout_lm(:,:,1:nspin_mag)
-    ENDIF
-    !
-    IF (TIMING) CALL stop_clock( 'PAW_dgcxc_v' )
-    !
-  END SUBROUTINE PAW_dgcxc_potential
+   REAL(DP) :: div_h(i%m,i%l**2,nspin_gga)        ! div(hamiltonian)
+   ! 
+   REAL(DP), ALLOCATABLE :: r(:,:), rho(:), arho(:), gradsw(:,:,:), sign_v(:)
+   REAL(DP), ALLOCATABLE :: v1x(:,:), v2x(:,:), v1c(:,:), v2c(:,:), v2c_ud(:)
+   REAL(DP), ALLOCATABLE :: dsvxc_rr(:,:,:), dsvxc_sr(:,:,:), dsvxc_ss(:,:,:)
+   
+   REAL(DP), DIMENSION(i%m) :: sx, sc
+   !
+   REAL(DP) :: dsvxc_s(nspin_gga,nspin_gga)
+   INTEGER  :: k, ix, is, lm! counters on spin and mesh
+   INTEGER  :: js, ls, ks, ipol
+   REAL(DP) :: a(2,2,2), b(2,2,2,2), c(2,2,2)
+   REAL(DP) :: s1
+   REAL(DP) :: ps(2,2), ps1(3,2,2), ps2(3,2,2,2)
+   !
+   IF (TIMING) CALL start_clock( 'PAW_dgcxc_v' )
+   !
+   zero    = 0.0_DP
+   gc_rad  = 0.0_DP
+   h_rad   = 0.0_DP
+   vout_lm = 0.0_DP
+   !
+   ALLOCATE( r(i%m,nspin_gga) )
+   ALLOCATE( v1x(i%m,nspin_gga), v2x(i%m,nspin_gga) )
+   ALLOCATE( v1c(i%m,nspin_gga), v2c(i%m,nspin_gga) )
+   IF (nspin_gga==2) ALLOCATE( v2c_ud(i%m) )
+   ALLOCATE( dsvxc_rr(i%m,nspin_gga,nspin_gga) )
+   ALLOCATE( dsvxc_sr(i%m,nspin_gga,nspin_gga) )
+   ALLOCATE( dsvxc_ss(i%m,nspin_gga,nspin_gga) )
+   ALLOCATE( gradsw(3,i%m,nspin_gga) )
+   !
+   !
+   IF ( nspin_mag == 1 ) THEN
+      !
+      !     GGA case - no spin polarization
+      !
+      ALLOCATE( sign_v(i%m) )
+      !
+      DO ix = ix_s, ix_e
+         !
+         CALL PAW_lm2rad( i, ix, rho_lm, rho_rad, nspin_mag )
+         CALL PAW_gradient( i, ix, rho_lm, rho_rad, rho_core, grad2, grad )
+         CALL PAW_lm2rad( i, ix, drho_lm, drho_rad, nspin_mag )
+         CALL PAW_gradient( i, ix, drho_lm, drho_rad, zero, dgrad2, dgrad )
+         !
+         sign_v = 1._DP
+         !
+         DO k = 1, i%m
+            ! ... arho_v is the absolute value of real charge, sgn is its sign
+            r(k,1) = rho_rad(k,1)*g(i%t)%rm2(k) + rho_core(k)
+            r(k,1) = ABS(r(k,1))
+            !
+            ! ... using grad(rho)**2 here, so its eps has to be eps**2
+            IF ( r(k,1)<eps .OR. grad2(k,1)<eps2 ) THEN
+               r(k,1) = 0.5_DP
+               grad2(k,1) = 0.2_DP
+               sign_v(k)  = 0.0_DP
+            ENDIF
+         ENDDO
+         !
+         !
+         ! swap gradient indexes to match xc_gcx input (temporary)
+         DO k = 1, i%m
+            gradsw(1:3,k,1) = grad(k,1:3,1)
+         ENDDO
+         !
+         CALL xclib_set_threshold( 'gga', 1.E-10_DP )
+         !
+         CALL dgcxc( i%m, nspin_mag, r, grad, dsvxc_rr, dsvxc_sr, dsvxc_ss )
+         !
+         dsvxc_rr = dsvxc_rr / e2
+         dsvxc_sr = dsvxc_sr / e2
+         dsvxc_ss = dsvxc_ss / e2
+         !
+         CALL xc_gcx( i%m, nspin_mag, r, gradsw, sx, sc, v1x, v2x, v1c, v2c )
+         !
+         CALL xclib_set_threshold( 'gga', 1.D-6 )
+         !
+         DO k = 1, i%m
+            s1 = grad(k,1,1) * dgrad(k,1,1) + &
+                 grad(k,2,1) * dgrad(k,2,1) + &
+                 grad(k,3,1) * dgrad(k,3,1)
+            !
+            dsvxc_s = v2x(k,1) + v2c(k,1)
+            !
+            gc_rad(k,ix,1)  = ( dsvxc_rr(k,1,1) * drho_rad(k,1) * g(i%t)%rm2(k) &
+                              + dsvxc_sr(k,1,1) * s1 ) * sign_v(k)
+            !
+            h_rad(k,:,ix,1) = ( (dsvxc_sr(k,1,1) * drho_rad(k,1) * g(i%t)%rm2(k) + &
+                                 dsvxc_ss(k,1,1)*s1) * grad(k,:,1) + &
+                                 dsvxc_s(1,1)*dgrad(k,:,1) ) * g(i%t)%r2(k) * sign_v(k)
+            !
+         ENDDO
+         !
+      ENDDO
+      !
+      DEALLOCATE( sign_v )
+      !
+      !
+   ELSEIF ( nspin_mag==2 .OR. nspin_mag==4 ) THEN
+      !
+      ! \sigma-GGA case - spin polarization
+      !
+      IF ( nspin_mag==4 ) THEN
+         CALL compute_drho_spin_lm( i, rho_lm, drho_lm, rhoout_lm, &
+                                    drhoout_lm, segni_rad )
+      ELSE
+         rhoout_lm  = rho_lm
+         drhoout_lm = drho_lm
+      ENDIF
+      !
+      DO ix = ix_s, ix_e
+         !
+         CALL PAW_lm2rad( i, ix, rhoout_lm, rho_rad, nspin_gga )
+         CALL PAW_gradient( i, ix, rhoout_lm, rho_rad, rho_core, grad2, grad )
+         CALL PAW_lm2rad( i, ix, drhoout_lm, drho_rad, nspin_gga )
+         CALL PAW_gradient( i, ix, drhoout_lm, drho_rad, zero, dgrad2, dgrad )
+         !
+         ! Prepare the necessary quantities
+         ! rho_core is considered half spin up and half spin down
+         !
+         r(:,1) = rho_rad(:,1)*g(i%t)%rm2(:) + rho_core(:)/DBLE(nspin_gga)
+         r(:,2) = rho_rad(:,2)*g(i%t)%rm2(:) + rho_core(:)/DBLE(nspin_gga)
+         !
+         ! swap gradient indexes to match xc_gcx input (temporary)
+         DO k = 1, i%m
+            gradsw(1:3,k,1) = grad(k,1:3,1)
+            gradsw(1:3,k,2) = grad(k,1:3,2)
+         ENDDO
+         !
+         CALL dgcxc( i%m, nspin_gga, r, grad, dsvxc_rr, dsvxc_sr, dsvxc_ss )
+         !
+         dsvxc_rr = dsvxc_rr / e2
+         dsvxc_sr = dsvxc_sr / e2
+         dsvxc_ss = dsvxc_ss / e2
+         !
+         CALL xc_gcx( i%m, nspin_gga, r, gradsw, sx, sc, v1x, v2x, v1c, v2c, v2c_ud )
+         !
+         DO k = 1, i%m
+            !
+            IF ( r(k,1)+r(k,2) > eps ) THEN
+               dsvxc_s(1,1) = v2x(k,1) + v2c(k,1)
+               dsvxc_s(1,2) = v2c(k,1)
+               dsvxc_s(2,1) = v2c(k,1)
+               dsvxc_s(2,2) = v2x(k,2) + v2c(k,1)
+            ELSE
+               dsvxc_s = 0._DP
+            ENDIF
+            !
+            ps(:,:) = (0._DP, 0._DP)
+            !
+            DO is = 1, nspin_gga
+               DO js = 1, nspin_gga
+                  !
+                  ps1(:,is,js) = drho_rad(k,is)*g(i%t)%rm2(k)*grad(k,:,js)
+                  !
+                  DO ipol = 1, 3
+                     ps(is,js) = ps(is,js) + grad(k,ipol,is)*dgrad(k,ipol,js)
+                  ENDDO
+                  !
+                  DO ks = 1, nspin_gga
+                     !
+                     IF ( is==js .AND. js==ks ) THEN
+                        a(is,js,ks) = dsvxc_sr(k,is,is)
+                        c(is,js,ks) = dsvxc_sr(k,is,is)
+                     ELSE
+                        IF ( is==1 ) THEN
+                           a(is,js,ks) = dsvxc_sr(k,1,2)
+                        ELSE
+                           a(is,js,ks) = dsvxc_sr(k,2,1)
+                        ENDIF
+                        IF ( js==1 ) THEN
+                           c(is,js,ks) = dsvxc_sr(k,1,2)
+                        ELSE
+                           c(is,js,ks) = dsvxc_sr(k,2,1)
+                        ENDIF
+                     ENDIF
+                     !
+                     ps2(:,is,js,ks) = ps(is,js) * grad(k,:,ks)
+                     !
+                     DO ls = 1, nspin_gga
+                        !
+                        IF ( is==js .AND. js==ks .AND. ks==ls ) THEN
+                           b(is,js,ks,ls) = dsvxc_ss(k,is,is)
+                        ELSE
+                           IF ( is==1 ) THEN
+                              b(is,js,ks,ls) = dsvxc_ss(k,1,2)
+                           ELSE
+                              b(is,js,ks,ls) = dsvxc_ss(k,2,1)
+                           ENDIF
+                        ENDIF
+                        !
+                     ENDDO
+                     !
+                  ENDDO
+                  !
+               ENDDO
+            ENDDO
+            !
+            DO is = 1, nspin_gga
+               DO js = 1, nspin_gga
+                  !
+                  gc_rad(k,ix,is)  = gc_rad(k,ix,is)  + dsvxc_rr(k,is,js) &
+                                             * drho_rad(k,js)*g(i%t)%rm2(k)
+                  h_rad(k,:,ix,is) = h_rad(k,:,ix,is) + dsvxc_s(is,js)  &
+                                             * dgrad(k,:,js)
+                  !
+                  DO ks = 1, nspin_gga
+                     !
+                     gc_rad(k,ix,is) = gc_rad(k,ix,is)+a(is,js,ks)*ps(js,ks)
+                     h_rad(k,:,ix,is) = h_rad(k,:,ix,is) + &
+                                        c(is,js,ks) * ps1(:,js,ks)
+                     DO ls = 1, nspin_gga
+                        h_rad(k,:,ix,is) = h_rad(k,:,ix,is) + &
+                                           b(is,js,ks,ls) * ps2(:,js,ks,ls)
+                     ENDDO
+                     !
+                  ENDDO
+                  !
+               ENDDO
+            ENDDO
+            !
+            h_rad(k,:,ix,:) = h_rad(k,:,ix,:)*g(i%t)%r2(k)
+            !
+         ENDDO  ! k
+         !   
+      ENDDO ! ix
+      !
+   ELSE
+      !
+      CALL errore( 'PAW_gcxc_v', 'unknown spin number', 2 )
+      !
+   ENDIF 
+   !
+   DEALLOCATE( r )
+   DEALLOCATE( v1x, v2x, v1c )
+   IF (nspin_gga==2) DEALLOCATE( v2c_ud )
+   DEALLOCATE( dsvxc_rr, dsvxc_sr, dsvxc_ss )
+   DEALLOCATE( gradsw )
+   !
+   ! convert the first part of the GC correction back to spherical harmonics
+   CALL PAW_rad2lm( i, gc_rad, gc_lm, i%l, nspin_gga )
+   !
+   ! We need the divergence of h to calculate the last part of the exchange
+   ! and correlation potential. First we have to convert H to its Y_lm expansion
+   DO ix = ix_s, ix_e
+      h_rad(1:i%m,3,ix,1:nspin_gga) = h_rad(1:i%m,3,ix,1:nspin_gga) &
+                                                    /rad(i%t)%sin_th(ix)
+   ENDDO
+   !
+   CALL PAW_rad2lm3( i, h_rad, h_lm, i%l+rad(i%t)%ladd, nspin_gga )
+   !
+   ! Compute div(H)
+   CALL PAW_divergence( i, h_lm, div_h, i%l+rad(i%t)%ladd, i%l )
+   !                         input max lm --^     ^-- output max lm
+   ! Finally sum it back into v_xc
+   DO is = 1, nspin_gga
+      DO lm = 1, i%l**2
+           vout_lm(1:i%m,lm,is) = vout_lm(1:i%m,lm,is) + &
+                                  e2*(gc_lm(1:i%m,lm,is)-div_h(1:i%m,lm,is))
+      ENDDO
+   ENDDO
+   !
+   !  In the noncollinear case we have to calculate the four components of
+   !  the potential
+   !
+   IF (nspin_mag == 4 ) THEN
+      CALL compute_dpot_nonc( i, vout_lm, v_lm, segni_rad, rho_lm, drho_lm )
+   ELSE
+      v_lm(:,:,1:nspin_mag) = v_lm(:,:,1:nspin_mag)+vout_lm(:,:,1:nspin_mag)
+   ENDIF
+   !
+   IF (TIMING) CALL stop_clock( 'PAW_dgcxc_v' )
+   !
+ END SUBROUTINE PAW_dgcxc_potential
   !
   !-------------------------------------------------------------------------
   SUBROUTINE compute_rho_spin_lm( i, rho_lm, rhoout_lm, segni_rad )
